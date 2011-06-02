@@ -22,29 +22,30 @@
 
 package org.xnio;
 
+import static org.xnio.Buffers.flip;
+
 import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.net.SocketAddress;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.Executor;
-import java.util.concurrent.locks.Condition;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
-import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
-import java.util.Set;
 import java.nio.ByteBuffer;
 import java.nio.channels.ClosedChannelException;
 import java.nio.channels.FileChannel;
+import java.util.Set;
+import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
-import javax.net.ssl.SSLSession;
 import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLEngineResult;
+import javax.net.ssl.SSLEngineResult.HandshakeStatus;
+import javax.net.ssl.SSLSession;
 
 import org.jboss.logging.Logger;
 import org.xnio.channels.ConnectedSslStreamChannel;
 import org.xnio.channels.ConnectedStreamChannel;
-
-import static org.xnio.Buffers.flip;
 
 @SuppressWarnings( { "ThisEscapedInObjectConstruction" })
 final class ConnectedSslStreamChannelImpl implements ConnectedSslStreamChannel {
@@ -104,7 +105,9 @@ final class ConnectedSslStreamChannelImpl implements ConnectedSslStreamChannel {
      */
     private final Condition writeAwaiters = mainLock.newCondition();
 
+    // user read enabled
     private boolean userReads;
+    // user write enabled
     private boolean userWrites;
     // readers need a wrap to proceed
     private boolean needsWrap;
@@ -112,6 +115,8 @@ final class ConnectedSslStreamChannelImpl implements ConnectedSslStreamChannel {
     private boolean needsUnwrap;
     // signal new data available
     private boolean newReadData;
+    // channel closed
+    private boolean closedChannel;
 
     /**
      * The application data read buffer.  Filled if a read required more space than the user buffer had available.  Reads
@@ -249,6 +254,10 @@ final class ConnectedSslStreamChannelImpl implements ConnectedSslStreamChannel {
             final int produced = wrapResult.bytesProduced();
             switch (wrapResult.getStatus()) {
                 case CLOSED: {
+                    if (produced > 0) {
+                        log.tracef("Data produced, flush needed");
+                        continue;
+                    }
                     return true;
                 }
                 case BUFFER_OVERFLOW: {
@@ -309,6 +318,17 @@ final class ConnectedSslStreamChannelImpl implements ConnectedSslStreamChannel {
                                 final SSLEngineResult unwrapResult = sslEngine.unwrap(receiveBuffer, readBuffer);
                                 readAwaiters.signalAll();
                                 switch (unwrapResult.getStatus()) {
+                                    case BUFFER_OVERFLOW: {
+                                        log.tracef("Growing application readBuffer from %s", readBuffer);
+                                        final int appBufSize = sslEngine.getSession().getApplicationBufferSize();
+                                        if (readBuffer.capacity() >= appBufSize) {
+                                            // the say the buf is too small, yet it's already at least their required size...?
+                                            throw new IOException("Unexpected/inexplicable buffer overflow from the SSL engine");
+                                        }
+                                        log.tracef("Grew application readBuffer to %s", this.readBuffer = ByteBuffer.allocate(appBufSize));
+                                        // try again with the bigger buffer...
+                                        continue;
+                                    }
                                     case BUFFER_UNDERFLOW: {
                                         newReadData = false;
                                         // not enough data.  First, see if there is room left in the receive buf - if not, grow it.
@@ -382,35 +402,36 @@ final class ConnectedSslStreamChannelImpl implements ConnectedSslStreamChannel {
     }
 
     public void close() throws IOException {
+        IOException e1 = null;
+        IOException e2 = null;
         final Lock mainLock = this.mainLock;
         mainLock.lock();
         try {
             sslEngine.closeOutbound();
-            IOException e1 = null;
-            IOException e2 = null;
             try {
                 sslEngine.closeInbound();
             } catch (IOException e) {
                 e1 = e;
             }
-            try {
-                connectedStreamChannel.close();
-            } catch (IOException e) {
-                e2 = e;
-            }
-            if (e1 != null && e2 != null) {
-                final IOException t = new IOException("Multiple failures on close!  The second exception is: " + e2.toString());
-                t.initCause(e1);
-                throw t;
-            }
-            if (e1 != null) {
-                throw e1;
-            }
-            if (e2 != null) {
-                throw e2;
-            }
         } finally {
             mainLock.unlock();
+        }
+        // avoid deadlocks involving mainLock by closing connectedStreamChannel, which might block, outside of the locked block
+        try {
+            connectedStreamChannel.close();
+        } catch (IOException e) {
+            e2 = e;
+        }
+        if (e1 != null && e2 != null) {
+            final IOException t = new IOException("Multiple failures on close!  The second exception is: " + e2.toString());
+            t.initCause(e1);
+            throw t;
+        }
+        if (e1 != null) {
+            throw e1;
+        }
+        if (e2 != null) {
+            throw e2;
         }
     }
 
@@ -460,6 +481,7 @@ final class ConnectedSslStreamChannelImpl implements ConnectedSslStreamChannel {
         mainLock.lock();
         try {
             userReads = false;
+            connectedStreamChannel.suspendReads();
         } finally {
             mainLock.unlock();
         }
@@ -470,6 +492,7 @@ final class ConnectedSslStreamChannelImpl implements ConnectedSslStreamChannel {
         mainLock.lock();
         try {
             userWrites = false;
+            connectedStreamChannel.suspendWrites();
         } finally {
             mainLock.unlock();
         }
@@ -504,13 +527,8 @@ final class ConnectedSslStreamChannelImpl implements ConnectedSslStreamChannel {
         mainLock.lock();
         try {
             userWrites = true;
-            if (needsUnwrap) {
-                log.tracef("Application resumeWrites() -> SSL resumeReads()");
-                connectedStreamChannel.resumeReads();
-            } else {
-                log.tracef("Application resumeWrites() -> SSL resumeWrites()");
-                connectedStreamChannel.resumeWrites();
-            }
+            log.tracef("Application resumeWrites() -> SSL resumeWrites()");
+            connectedStreamChannel.resumeWrites();
         } finally {
             mainLock.unlock();
         }
@@ -533,6 +551,8 @@ final class ConnectedSslStreamChannelImpl implements ConnectedSslStreamChannel {
         mainLock.lock();
         try {
             if (flush()) {
+                closedChannel = true;
+                userWrites = false;
                 log.tracef("Shutting down writes");
                 sslEngine.closeOutbound();
                 return flush() && sslEngine.isOutboundDone() && connectedStreamChannel.shutdownWrites();
@@ -646,6 +666,7 @@ final class ConnectedSslStreamChannelImpl implements ConnectedSslStreamChannel {
         if (length < 1) {
             return 0L;
         }
+        long totalOfBytesConsumed = 0;
         final SSLEngine sslEngine = this.sslEngine;
         final Lock mainLock = this.mainLock;
         mainLock.lock();
@@ -657,6 +678,7 @@ final class ConnectedSslStreamChannelImpl implements ConnectedSslStreamChannel {
                 log.tracef("Wrap result is %s", wrapResult);
                 final int produced = wrapResult.bytesProduced();
                 final int consumed = wrapResult.bytesConsumed();
+                totalOfBytesConsumed += consumed;
                 final ConnectedStreamChannel connectedStreamChannel = this.connectedStreamChannel;
                 switch (wrapResult.getStatus()) {
                     case BUFFER_OVERFLOW: {
@@ -677,7 +699,7 @@ final class ConnectedSslStreamChannelImpl implements ConnectedSslStreamChannel {
                             try {
                                 final int res = connectedStreamChannel.write(sendBuffer);
                                 if (res == 0) {
-                                    return consumed;
+                                    return totalOfBytesConsumed;
                                 }
                             } finally {
                                 sendBuffer.compact();
@@ -689,7 +711,7 @@ final class ConnectedSslStreamChannelImpl implements ConnectedSslStreamChannel {
                     case BUFFER_UNDERFLOW: {
                         log.tracef("Source buffer must be empty, finished");
                         // the source buffer must be empty, since there's no minimum?
-                        return consumed;
+                        return totalOfBytesConsumed;
                     }
                     case CLOSED: {
                         log.tracef("Attempted to write after the channel is shut down");
@@ -755,7 +777,7 @@ final class ConnectedSslStreamChannelImpl implements ConnectedSslStreamChannel {
                                                     } else if (res == 0) {
                                                         log.tracef("Read would block, setting needsUnwrap = true");
                                                         needsUnwrap = true;
-                                                        return consumed;
+                                                        return totalOfBytesConsumed;
                                                     } else {
                                                         log.tracef("Read successful, retrying unwrap");
                                                         // retry the unwrap!
@@ -779,12 +801,28 @@ final class ConnectedSslStreamChannelImpl implements ConnectedSslStreamChannel {
                                             }
                                             case CLOSED: {
                                                 log.tracef("Read on closed channel, return");
-                                                return consumed == 0 ? -1 : consumed;
+                                                return totalOfBytesConsumed == 0 ? -1: totalOfBytesConsumed;
                                             }
                                             case OK: {
                                                 log.tracef("Unwrap succeeded, proceeding with wrap");
-                                                // great, now we should be able to proceed with wrap
-                                                continue WRAP;
+                                                SSLEngineResult.HandshakeStatus handshake = unwrapResult.getHandshakeStatus();
+                                                switch (handshake) {
+                                                    case FINISHED:
+                                                    case NOT_HANDSHAKING:
+                                                    case NEED_WRAP:
+                                                        continue WRAP;
+                                                    case NEED_TASK:
+                                                        final Runnable task = sslEngine.getDelegatedTask();
+                                                        log.tracef("Running delegated task %s", task);
+                                                        task.run();
+                                                        log.tracef("Finished delegated task %s", task);
+                                                        continue;
+                                                    case NEED_UNWRAP:
+                                                        continue UNWRAP;
+                                                    default : {
+                                                        throw new IOException("Unexpected handshake status " + handshake);
+                                                    }
+                                                }
                                             }
                                             default: {
                                                 throw new IOException("Unexpected unwrap result status " + unwrapResult.getStatus());
@@ -801,7 +839,15 @@ final class ConnectedSslStreamChannelImpl implements ConnectedSslStreamChannel {
                             // not reached
                         }
                         // else we consumed some write data, so call the op finished
-                        return consumed;
+                        log.tracef("Flushing wrapped data");
+                        // there's some data in there, so send it first
+                        sendBuffer.flip();
+                        try {
+                            connectedStreamChannel.write(sendBuffer);
+                        } finally {
+                            sendBuffer.compact();
+                        }
+                        return totalOfBytesConsumed;
                     }
                     default: {
                         throw new IOException("Unexpected wrap result status " + wrapResult.getStatus());
@@ -902,6 +948,7 @@ final class ConnectedSslStreamChannelImpl implements ConnectedSslStreamChannel {
                             sslEngine.closeInbound();
                             // continue
                         } else if (rres == 0) {
+                            needsUnwrap = unwrapResult.getHandshakeStatus() == HandshakeStatus.NEED_UNWRAP;
                             return 0;
                         }
                         newReadData = true;
@@ -913,7 +960,12 @@ final class ConnectedSslStreamChannelImpl implements ConnectedSslStreamChannel {
                         // end of the line, dude
                         // if we need to wrap more data, the write side will take care of it
                         needsUnwrap = false;
-                        return -1;
+                        needsWrap = false;
+                        closedChannel = true;
+                        if (unwrapResult.getHandshakeStatus() == HandshakeStatus.FINISHED || unwrapResult.getHandshakeStatus() == HandshakeStatus.NOT_HANDSHAKING) {
+                            return -1;
+                        }
+                        // fall thru!
                     }
                     case OK: {
                         needsUnwrap = false;
@@ -937,6 +989,13 @@ final class ConnectedSslStreamChannelImpl implements ConnectedSslStreamChannel {
                                     task.run();
                                     log.tracef("Delegated task %s complete", task);
                                     // try unwrap again
+                                    continue;
+                                }
+                                case FINISHED:
+                                     needsUnwrap = false;
+                                     needsWrap = false;
+                                    // fall thru!!!
+                                case NEED_UNWRAP: {
                                     continue;
                                 }
                                 case NEED_WRAP: {
@@ -977,10 +1036,43 @@ final class ConnectedSslStreamChannelImpl implements ConnectedSslStreamChannel {
                                                 // OK, we made some space, retry the wrap
                                                 continue WRAP;
                                             }
+                                            case CLOSED:
                                             case OK: {
+                                                // send buffer is not too small, it just doesn't have enough space
+                                                // thus we have to flush the send buffer
+                                                sendBuffer.flip();
+                                                try {
+                                                    final int res = connectedStreamChannel.write(sendBuffer);
+                                                    if (res == 0) {
+                                                        log.tracef("Channel is not writable, set needsWrap = true");
+                                                        // the channel is not readable until it's writable, what a pain in the ass :(
+                                                        needsWrap = true;
+                                                        return 0;
+                                                    }
+                                                } finally {
+                                                    sendBuffer.compact();
+                                                }
+                                                needsWrap = false;
                                                 log.tracef("Wrap successful, continuing unwrap");
                                                 // OK, the path is clear! try the read again.
-                                                needsWrap = false;
+                                                switch(wrapResult.getHandshakeStatus()) {
+                                                    case NEED_WRAP:
+                                                        continue WRAP;
+                                                    case NEED_UNWRAP:
+                                                        needsWrap = false;
+                                                        continue UNWRAP;
+                                                    case FINISHED:
+                                                        // handshake is finished, we need
+                                                        // to enable Wrap
+                                                        //needsWrap = true;
+                                                        continue UNWRAP;
+                                                    case NEED_TASK:
+                                                        final Runnable task = sslEngine.getDelegatedTask();
+                                                        log.tracef("Running delegated task %s", task);
+                                                        task.run();
+                                                        log.tracef("Delegated task %s complete", task);
+                                                        continue WRAP;
+                                                }
                                                 continue UNWRAP;
                                             }
                                             default: {
@@ -1043,8 +1135,8 @@ final class ConnectedSslStreamChannelImpl implements ConnectedSslStreamChannel {
             } finally {
                 mainLock.unlock();
             }
-            if (runRead) runReadListener();
             if (runWrite) runWriteListener();
+            if (runRead) runReadListener();
         }
     }
 
@@ -1066,7 +1158,7 @@ final class ConnectedSslStreamChannelImpl implements ConnectedSslStreamChannel {
                         runRead = true;
                     }
                 }
-                if (userWrites && needsUnwrap) {
+                if (userWrites && needsUnwrap && !closedChannel) {
                     userWrites = false;
                     runWrite = true;
                 }
@@ -1074,7 +1166,17 @@ final class ConnectedSslStreamChannelImpl implements ConnectedSslStreamChannel {
                 mainLock.unlock();
             }
             if (runRead) runReadListener();
-            if (runWrite) runWriteListener();
+            if (runWrite) {
+                mainLock.lock();
+                try {
+                    runWrite = !closedChannel;
+                } finally {
+                    mainLock.unlock();
+                }
+                if (runWrite) {
+                    runWriteListener();
+                }
+            }
         }
     }
 

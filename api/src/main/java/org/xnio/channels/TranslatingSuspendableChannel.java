@@ -112,6 +112,8 @@ public abstract class TranslatingSuspendableChannel<C extends SuspendableChannel
                         channel.suspendWrites();
                     }
                 }
+            // call writeListener in a loop to make sure write is active when
+            // underlying channel is not actually writable, but channel impl is
             } while (doWrites);
         }
     };
