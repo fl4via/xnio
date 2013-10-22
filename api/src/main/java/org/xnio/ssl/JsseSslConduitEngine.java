@@ -978,7 +978,7 @@ final class JsseSslConduitEngine {
      */
     public void awaitCanUnwrap() throws IOException {
         int oldState = state;
-        if (anyAreSet(oldState, READ_SHUT_DOWN) || ! anyAreSet(oldState, NEED_WRAP)) {
+        if (readBuffer.getResource().position() > 0 || anyAreSet(oldState, READ_SHUT_DOWN) || ! anyAreSet(oldState, NEED_WRAP)) {
             return;
         }
         final Thread thread = currentThread();
@@ -1009,7 +1009,7 @@ final class JsseSslConduitEngine {
      */
     public void awaitCanUnwrap(long time, TimeUnit timeUnit) throws IOException {
         int oldState = state;
-        if (anyAreSet(oldState, READ_SHUT_DOWN) || ! anyAreSet(oldState, NEED_WRAP)) {
+        if (readBuffer.getResource().position() > 0 || anyAreSet(oldState, READ_SHUT_DOWN) || ! anyAreSet(oldState, NEED_WRAP)) {
             return;
         }
         final Thread thread = currentThread();
