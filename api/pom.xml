@@ -13,6 +13,7 @@
 
     <properties>
         <skip.enforcer>false</skip.enforcer>
+        <test.level>INFO</test.level>
     </properties>
 
     <parent>
@@ -159,6 +160,10 @@
                         <property>
                             <name>java.util.logging.manager</name>
                             <value>org.jboss.logmanager.LogManager</value>
+                        </property>
+                        <property>
+                            <name>test.level</name>
+                            <value>${test.level}</value>
                         </property>
                     </systemProperties>
                     <includes>
