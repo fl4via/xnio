@@ -19,7 +19,6 @@
 
 package org.xnio.ssl;
 
-import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -28,7 +27,6 @@ import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 import java.io.IOException;
-import java.lang.reflect.Field;
 import java.net.Inet4Address;
 import java.net.InetSocketAddress;
 import java.net.URL;
@@ -36,13 +34,11 @@ import java.nio.channels.Channel;
 import java.util.concurrent.CancellationException;
 
 import javax.net.ssl.SSLContext;
-import javax.net.ssl.SSLEngine;
 
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.xnio.ChannelListener;
-import org.xnio.ChannelListeners;
 import org.xnio.IoFuture;
 import org.xnio.OptionMap;
 import org.xnio.Options;
@@ -62,9 +58,6 @@ import org.xnio.mock.XnioWorkerMock;
  */
 @SuppressWarnings("deprecation")
 public class JsseXnioSslTestCase {
-    private static final Field setterField;
-    private static final Field connectionEngineField;
-    private static final Field conduitEngineField;
     private static final String KEY_STORE_PROPERTY = "javax.net.ssl.keyStore";
     private static final String KEY_STORE_PASSWORD_PROPERTY = "javax.net.ssl.keyStorePassword";
     private static final String TRUST_STORE_PROPERTY = "javax.net.ssl.trustStore";
@@ -73,24 +66,6 @@ public class JsseXnioSslTestCase {
     private static final String DEFAULT_KEY_STORE_PASSWORD = "apiTest";
 
     private static final int SERVER_PORT = 23456;
-    
-    static {
-        try {
-            Class<?> delegateSetterClass = JsseXnioSslTestCase.class.getClassLoader().loadClass(ChannelListeners.class.getName()+ "$DelegatingSetter");
-            setterField = delegateSetterClass.getDeclaredField("setter");
-            setterField.setAccessible(true);
-            connectionEngineField = JsseSslStreamConnection.class.getDeclaredField("sslConduitEngine");
-            connectionEngineField.setAccessible(true);
-            conduitEngineField = JsseSslConduitEngine.class.getDeclaredField("engine");
-            conduitEngineField.setAccessible(true);
-        } catch (ClassNotFoundException e) {
-            throw new RuntimeException(e);
-        } catch (NoSuchFieldException e) {
-            throw new RuntimeException(e);
-        } catch (SecurityException e) {
-            throw new RuntimeException(e);
-        }
-    }
 
     @BeforeClass
     public static void setKeyStoreAndTrustStore() {
@@ -271,8 +246,6 @@ public class JsseXnioSslTestCase {
         assertEquals(localAddress, connection.getLocalAddress());
         assertEquals(serverAddress, connection.getPeerAddress());
         assertTrue(connection.getOption(Options.TCP_NODELAY));
-        final SSLEngine engine = (SSLEngine) conduitEngineField.get((JsseSslConduitEngine) connectionEngineField.get(connection));
-        assertTrue(engine.getEnableSessionCreation());
     }
 
     @Test
@@ -310,11 +283,6 @@ public class JsseXnioSslTestCase {
         assertTrue(boundChannel.getOption(Options.MULTICAST));
         assertEquals(1000, (int) connection.getOption(Options.READ_TIMEOUT));
         assertEquals(1000, (int) boundChannel.getOption(Options.READ_TIMEOUT));
-
-        final SSLEngine engine = (SSLEngine) conduitEngineField.get((JsseSslConduitEngine) connectionEngineField.get(connection));
-        assertFalse(engine.getEnableSessionCreation());
-        assertArrayEquals(validCipherSuites, engine.getEnabledCipherSuites());
-        assertArrayEquals(validProtocols, engine.getEnabledProtocols());
     }
 
     @Test
