@@ -232,7 +232,7 @@ public class JsseSslStreamConnectionTestCase extends AbstractSslConnectionTest{
 
         writeFuture.get();
         sinkConduit.terminateWrites();
-        // FIXME workaround for bug found in SSLEngine assertFalse(sinkConduit.flush());
+        assertFalse(sinkConduit.flush());
         conduitMock.setReadData(CLOSE_MSG);
         final ByteBuffer readBuffer = readFuture.get();
         assertNotNull(readBuffer);
@@ -288,7 +288,7 @@ public class JsseSslStreamConnectionTestCase extends AbstractSslConnectionTest{
 
         writeFuture.get();
         sinkConduit.terminateWrites();
-        // FIXME workaround for bug found in SSLEngine assertFalse(sinkConduit.flush());
+        assertFalse(sinkConduit.flush());
         conduitMock.setReadData("CLOSE_MSG");
         final ByteBuffer readBuffer = readFuture.get();
         assertNotNull(readBuffer);
@@ -327,7 +327,7 @@ public class JsseSslStreamConnectionTestCase extends AbstractSslConnectionTest{
 
         writeFuture.get();
         sinkConduit.terminateWrites();
-        // FIXME workaround for bug found in SSLEngine assertFalse(sinkConduit.flush());
+        assertFalse(sinkConduit.flush());
         conduitMock.setReadData(CLOSE_MSG);
         final ByteBuffer readBuffer = readFuture.get();
         assertNotNull(readBuffer);
@@ -370,7 +370,7 @@ public class JsseSslStreamConnectionTestCase extends AbstractSslConnectionTest{
 
         writeFuture.get();
         sinkConduit.terminateWrites();
-        // FIXME workaround for bug found in SSLEngine assertFalse(sinkConduit.flush());
+        assertFalse(sinkConduit.flush());
         conduitMock.setReadData("[_)(*&^%$#@!]");
         final ByteBuffer readBuffer = readFuture.get();
         assertNotNull(readBuffer);

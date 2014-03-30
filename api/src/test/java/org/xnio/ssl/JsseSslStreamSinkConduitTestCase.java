@@ -63,7 +63,7 @@ public class JsseSslStreamSinkConduitTestCase extends AbstractSslConnectionTest 
         assertFalse(buffer.hasRemaining());
         // conduit should not be able to shutdown writes... for that, it must receive a close message
         sinkConduit.terminateWrites();
-        // FIXME workaround for bug found in SSLEngine assertFalse(sinkConduit.flush());
+        assertFalse(sinkConduit.flush());
         // send the close message
         conduitMock.setReadData(CLOSE_MSG);
         conduitMock.enableReads(true);
@@ -90,7 +90,7 @@ public class JsseSslStreamSinkConduitTestCase extends AbstractSslConnectionTest 
         assertFalse(buffer.hasRemaining());
         // conduit should not be able to shutdown writes... for that, it must receive a close message
         sinkConduit.terminateWrites();
-        // FIXME workaround for bug found in SSLEngine assertFalse(sinkConduit.flush());
+        assertFalse(sinkConduit.flush());
         // send the close message
         conduitMock.setReadData(CLOSE_MSG);
         conduitMock.enableReads(true);
@@ -207,7 +207,6 @@ public class JsseSslStreamSinkConduitTestCase extends AbstractSslConnectionTest 
 
         // conduit should not be able to terminate writes... for that, it must receive a close message
         sinkConduit.terminateWrites();
-        // FIXME workaround for bug found in SSLEngine
         assertFalse(sinkConduit.flush());
         // send the close message
         conduitMock.setReadData("{message closed}");
@@ -237,7 +236,7 @@ public class JsseSslStreamSinkConduitTestCase extends AbstractSslConnectionTest 
         assertSame(HandshakeStatus.NEED_UNWRAP, engineMock.getHandshakeStatus());
         // conduit should not be able to shutdown writes... for that, it must receive a close message
         sinkConduit.terminateWrites();
-        // FIXME workaround for bug found in SSLEngine assertFalse(sinkConduit.flush());
+        assertFalse(sinkConduit.flush());
         // close connection
         sourceConduit.terminateReads();
         // data expected to have been written to 'conduitMock' by 'sinkConduit'
