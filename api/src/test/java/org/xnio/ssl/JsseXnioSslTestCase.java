@@ -278,6 +278,7 @@ public class JsseXnioSslTestCase {
         optionMapBuilder.set(Options.MULTICAST, true);
         optionMapBuilder.set(Options.READ_TIMEOUT, 1000);
         optionMapBuilder.set(Options.SSL_ENABLED_PROTOCOLS, Sequence.of(enabledProtocols));
+        optionMapBuilder.set(Options.SSL_STARTTLS, true);
         final IoFuture<? extends StreamConnection> ioFuture = xnioSsl.openSslConnection(worker, localAddress,
                 serverAddress, openListener, bindListener, optionMapBuilder.getMap());
         final StreamConnection connection = ioFuture.get();
@@ -383,6 +384,7 @@ public class JsseXnioSslTestCase {
         optionMapBuilder.set(Options.MULTICAST, true);
         optionMapBuilder.set(Options.READ_TIMEOUT, 1000);
         optionMapBuilder.set(Options.SSL_ENABLED_PROTOCOLS, Sequence.of(enabledProtocols));
+        optionMapBuilder.set(Options.SSL_STARTTLS, true);
         final IoFuture<? extends ConnectedStreamChannel> ioFuture = xnioSsl.connectSsl(worker, localAddress,
                 serverAddress, openListener, bindListener, optionMapBuilder.getMap());
         final ConnectedStreamChannel channel = ioFuture.get();
