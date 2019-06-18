@@ -168,9 +168,11 @@ public abstract class XnioWorker extends AbstractExecutorService implements Conf
     private static final ContextManager<XnioWorker> CONTEXT_MANAGER = doPrivileged((PrivilegedAction<ContextManager<XnioWorker>>) () -> new ContextManager<XnioWorker>(XnioWorker.class, "org.xnio.worker"));
 
     static {
-        doPrivileged((PrivilegedAction<Void>) () -> {
-            CONTEXT_MANAGER.setGlobalDefaultSupplier(() -> DefaultXnioWorkerHolder.INSTANCE);
-            return null;
+        doPrivileged(new PrivilegedAction<Void>() {
+            public Void run() {
+                CONTEXT_MANAGER.setGlobalDefaultSupplier(() -> DefaultXnioWorkerHolder.INSTANCE);
+                return null;
+            }
         });
     }
 

@@ -207,9 +207,11 @@ final class NioTcpServer extends AbstractNioChannel<NioTcpServer> implements Acc
                         final AtomicInteger counter = new AtomicInteger();
                         final CountDownLatch latch = new CountDownLatch(handles.length);
                         for (final NioTcpServerHandle handle : handles) {
-                            handle.getWorkerThread().execute(() -> {
-                                counter.getAndAdd(handle.getConnectionCount());
-                                latch.countDown();
+                            handle.getWorkerThread().execute(new Runnable() {
+                                public void run() {
+                                    counter.getAndAdd(handle.getConnectionCount());
+                                    latch.countDown();
+                                }
                             });
                         }
                         try {

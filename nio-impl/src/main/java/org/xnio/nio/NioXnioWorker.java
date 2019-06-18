@@ -432,9 +432,11 @@ final class NioXnioWorker extends XnioWorker {
         private ManagementRegistration registerServerMXBean(XnioServerMXBean serverMXBean){
             serverMetrics.addIfAbsent(serverMXBean);
             final Closeable handle = NioXnio.register(serverMXBean);
-            return () -> {
-                serverMetrics.remove(serverMXBean);
-                safeClose(handle);
+            return new ManagementRegistration() {
+                public void close() {
+                    serverMetrics.remove(serverMXBean);
+                    safeClose(handle);
+                }
             };
         }
 

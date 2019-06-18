@@ -34,35 +34,38 @@ final class DefaultXnioWorkerHolder {
     static final XnioWorker INSTANCE;
 
     static {
-        INSTANCE = doPrivileged((PrivilegedAction<XnioWorker>) () -> {
-            final Xnio xnio = Xnio.getInstance();
-            XnioWorker worker = null;
-            try {
-                worker = XnioXmlParser.parseWorker(xnio);
-            } catch (ConfigXMLParseException | IOException e) {
-                Messages.msg.trace("Failed to parse worker XML definition", e);
-            }
-            if (worker == null) {
-                final Iterator<XnioWorkerConfigurator> iterator = ServiceLoader.load(XnioWorkerConfigurator.class, DefaultXnioWorkerHolder.class.getClassLoader()).iterator();
-                while (worker == null) try {
-                    if (! iterator.hasNext()) break;
-                    final XnioWorkerConfigurator configurator = iterator.next();
-                    if (configurator != null) try {
-                        worker = configurator.createWorker();
-                    } catch (IOException e) {
-                        Messages.msg.trace("Failed to configure the default worker", e);
-                    }
-                } catch (ServiceConfigurationError e) {
-                    Messages.msg.trace("Failed to configure a service", e);
+        INSTANCE = doPrivileged(new PrivilegedAction<XnioWorker>() {
+
+            public XnioWorker run() {
+                final Xnio xnio = Xnio.getInstance();
+                XnioWorker worker = null;
+                try {
+                    worker = XnioXmlParser.parseWorker(xnio);
+                } catch (ConfigXMLParseException | IOException e) {
+                    Messages.msg.trace("Failed to parse worker XML definition", e);
                 }
+                if (worker == null) {
+                    final Iterator<XnioWorkerConfigurator> iterator = ServiceLoader.load(XnioWorkerConfigurator.class, DefaultXnioWorkerHolder.class.getClassLoader()).iterator();
+                    while (worker == null) try {
+                        if (! iterator.hasNext()) break;
+                        final XnioWorkerConfigurator configurator = iterator.next();
+                        if (configurator != null) try {
+                            worker = configurator.createWorker();
+                        } catch (IOException e) {
+                            Messages.msg.trace("Failed to configure the default worker", e);
+                        }
+                    } catch (ServiceConfigurationError e) {
+                        Messages.msg.trace("Failed to configure a service", e);
+                    }
+                }
+                if (worker == null) try {
+                    // create with defaults
+                    worker = xnio.createWorker(OptionMap.create(Options.THREAD_DAEMON, Boolean.TRUE));
+                } catch (IOException e) {
+                    throw new IOError(e);
+                }
+                return worker;
             }
-            if (worker == null) try {
-                // create with defaults
-                worker = xnio.createWorker(OptionMap.create(Options.THREAD_DAEMON, Boolean.TRUE));
-            } catch (IOException e) {
-                throw new IOError(e);
-            }
-            return worker;
         });
     }
 
