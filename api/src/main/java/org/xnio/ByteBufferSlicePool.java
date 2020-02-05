@@ -31,6 +31,13 @@ import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
+import org.jboss.logging.BasicLogger;
+import org.jboss.logging.Logger;
+
+import static org.jboss.logging.Logger.Level.TRACE;
+
+import org.xnio._private.Messages;
+
 import static org.xnio._private.Messages.msg;
 
 /**
@@ -47,6 +54,7 @@ import static org.xnio._private.Messages.msg;
  */
 public final class ByteBufferSlicePool implements Pool<ByteBuffer> {
 
+    private static final BasicLogger log = Logger.getMessageLogger(Messages.class, "org.xnio.api.bufferpool");
     private static final int LOCAL_LENGTH;
     private static final Queue<ByteBuffer> FREE_DIRECT_BUFFERS;
 
@@ -100,6 +108,8 @@ public final class ByteBufferSlicePool implements Pool<ByteBuffer> {
         } else {
             directBuffers = null;
         }
+        log.logf(TRACE, "New ByteBufferSlicePool %s (buffersPerRegion=%s, bufferSize=%s, allocator=%s, threadLocalQueueSize=%s)",
+                this, buffersPerRegion, bufferSize, allocator, threadLocalQueueSize);
     }
 
     /**
@@ -133,20 +143,24 @@ public final class ByteBufferSlicePool implements Pool<ByteBuffer> {
             }
             slice = localCache.queue.poll();
             if (slice != null) {
+                log.logf(TRACE, "%s.allocate() returning slice from localCache.queue", this);
                 return new PooledByteBuffer(slice, slice.slice());
             }
         }
         final Queue<Slice> sliceQueue = this.sliceQueue;
         slice = sliceQueue.poll();
         if (slice != null) {
+            log.logf(TRACE, "%s.allocate() returning slice from sliceQueue", this);
             return new PooledByteBuffer(slice, slice.slice());
         }
         synchronized (sliceQueue) {
             slice = sliceQueue.poll();
             if (slice != null) {
+                log.logf(TRACE, "%s.allocate() returning slice from sliceQueue synced", this);
                 return new PooledByteBuffer(slice, slice.slice());
             }
             final Slice newSlice = allocateSlices(buffersPerRegion, bufferSize);
+            log.logf(TRACE, "%s.allocate() returning newly allocated slice", this);
             return new PooledByteBuffer(newSlice, newSlice.slice());
         }
     }
@@ -157,14 +171,17 @@ public final class ByteBufferSlicePool implements Pool<ByteBuffer> {
             ByteBuffer region = FREE_DIRECT_BUFFERS.poll();
             try {
                 if (region != null) {
+                    log.logf(TRACE, "%s.allocateSlices() reusing direct buffer region", this);
                     return sliceReusedBuffer(region, buffersPerRegion, bufferSize);
                 }
+                log.logf(TRACE, "%s.allocateSlices() allocating new direct buffer region", this);
                 region = allocator.allocate(buffersPerRegion * bufferSize);
                 return sliceAllocatedBuffer(region, buffersPerRegion, bufferSize);
             } finally {
                 directBuffers.add(region);
             }
         }
+        log.logf(TRACE, "%s.allocateSlices() allocating new buffer region", this);
         return sliceAllocatedBuffer(
                 allocator.allocate(buffersPerRegion * bufferSize),
                 buffersPerRegion, bufferSize);
@@ -203,6 +220,7 @@ public final class ByteBufferSlicePool implements Pool<ByteBuffer> {
      * used.
      */
     public void clean() {
+        log.logf(TRACE, "Cleaning %s, marking all direct buffers for reuse", this);
         ThreadLocalCache localCache = localQueueHolder.get();
         if (!localCache.queue.isEmpty()) {
             localCache.queue.clear();
@@ -222,6 +240,7 @@ public final class ByteBufferSlicePool implements Pool<ByteBuffer> {
     }
 
     private ThreadLocalCache createThreadLocalCache() {
+        log.logf(TRACE, "%s creating thread local cache", this);
         return new ThreadLocalCache(this);
     }
 
@@ -263,6 +282,7 @@ public final class ByteBufferSlicePool implements Pool<ByteBuffer> {
         }
 
         public void discard() {
+            log.logf(TRACE, "%s discarding byte buffer", ByteBufferSlicePool.this);
             final ByteBuffer buffer = this.buffer;
             this.buffer = null;
             if (buffer != null) {
@@ -272,6 +292,7 @@ public final class ByteBufferSlicePool implements Pool<ByteBuffer> {
         }
 
         public void free() {
+            log.logf(TRACE, "%s freeing byte buffer", ByteBufferSlicePool.this);
             ByteBuffer buffer = this.buffer;
             this.buffer = null;
             if (buffer != null) {
@@ -347,6 +368,7 @@ public final class ByteBufferSlicePool implements Pool<ByteBuffer> {
                  */
                 protected void finalize() {
                     final ByteBufferSlicePool pool = ThreadLocalCache.this.pool.get();
+                    log.logf(TRACE, "%s finalizing thread local cache", pool);
                     if (pool == null)
                         return;
                     final ArrayDeque<Slice> deque = queue;
@@ -382,6 +404,7 @@ public final class ByteBufferSlicePool implements Pool<ByteBuffer> {
 
         public void remove() {
             final ByteBufferSlicePool pool = this.pool.get();
+            log.logf(TRACE, "%s removing thread local cache", pool);
             final ThreadLocalCache cache = get();
             if (pool != null && cache != null) {
                 //noinspection serial
