@@ -211,4 +211,8 @@ public final class ConduitStreamSinkChannel implements StreamSinkChannel, WriteL
             throw new IllegalStateException(e);
         }
     }
+
+    public String toString() {
+        return super.toString() + "(" + this.conduit + ")";
+    }
 }
