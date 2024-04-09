@@ -1,0 +1,97 @@
+# This workflow will build a Java project with Maven
+# For more information see: https://help.github.com/actions/language-and-framework-guides/building-and-testing-java-with-maven
+
+name: XNIO WildFly Integration CI
+
+on: push
+
+jobs:
+  build-all:
+    name: Compile (no tests) with JDK 8
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: AdoptOpenJDK/install-jdk@v1
+        name: Install JDK 8
+        with:
+          version: 8
+      - name: Build
+        run: mvn -U -B -fae -DskipTests clean install
+      - name: Tar Maven Repo
+        shell: bash
+        run: tar -czf maven-repo.tgz -C ~ .m2/repository
+      - name: Persist Maven Repo
+        uses: actions/upload-artifact@v1
+        with:
+          name: maven-repo
+          path: maven-repo.tgz
+      - uses: actions/upload-artifact@v2
+        if: failure()
+        with:
+          name: surefire-reports-build
+          path: '**/surefire-reports/*.txt'
+  test-matrix:
+    name: WildFly Integration ${{ matrix.os }}-${{ matrix.jdk-distribution }}-${{ matrix.jdk-version }}
+    runs-on: ${{ matrix.os }}
+    needs: build-all
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        jdk-version: [11, 17, 21]
+        jdk-distribution: [temurin, zulu, adopt, adopt-openj9, microsoft, corretto, semeru, oracle]
+        exclude:
+          - jdk-distribution: oracle
+            jdk-version: 11
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          path: xnio
+      - name: Download WildFly Core
+        uses: actions/checkout@v3
+        with:
+          repository: wildfly/wildfly-core
+          ref: main
+          path: wildfly-core
+      - name: Download WildFly
+        uses: actions/checkout@v3
+        with:
+          repository: wildfly/wildfly
+          ref: main
+          path: wildfly
+      - name: Upgrade XNIO
+        run: |
+          cd xnio
+          xnio_version=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
+          mvn clean install -DskipTests=true
+          cd ../wildfly-core
+          wfcore_version=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
+          sed -i "s/<version.org.jboss.xnio>.*<\/version.org.jboss.xnio>/<version.org.jboss.xnio>$xnio_version<\/version.org.jboss.xnio>/g" pom.xml
+          cd ../wildfly
+          sed -i "s/<version.org.wildfly.core>.*<\/version.org.wildfly.core>/<version.org.wildfly.core>$wfcore_version<\/version.org.wildfly.core>/g" pom.xml
+          cd ..
+      - name: Set up JDK ${{ matrix.jdk-distribution }} ${{ matrix.jdk-version }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: ${{ matrix.jdk-distribution }}
+          java-version: ${{ matrix.jdk-version }}
+      - name: Build XNIO
+        run: |
+          cd xnio
+          mvn clean install -DskipTests=true
+          cd ..
+      - name: Run WildFly Core Tests
+        run: |
+          cd wildfly-core
+          mvn -ntp -U -B -fae clean install
+          cd ..
+      - name: Run WildFly Tests
+        run: |
+          cd wildfly
+          sh build.sh -ntp -U -B -fae clean install
+          cd ..
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: surefire-WFIntegration-${{ matrix.jdk-distribution }}-${{ matrix.jdk-version }}-${{ matrix.os }}
+          path: '**/surefire-reports/*.txt'
