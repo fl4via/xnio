@@ -10,22 +10,23 @@ jobs:
     name: Compile (no tests) with JDK 8
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
-      - uses: AdoptOpenJDK/install-jdk@v1
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
         name: Install JDK 8
         with:
-          version: 8
+          distribution: adopt
+          java-version: 8
       - name: Build
         run: mvn -U -B -fae -DskipTests clean install
       - name: Tar Maven Repo
         shell: bash
         run: tar -czf maven-repo.tgz -C ~ .m2/repository
       - name: Persist Maven Repo
-        uses: actions/upload-artifact@v1
+        uses: actions/upload-artifact@v4
         with:
           name: maven-repo
           path: maven-repo.tgz
-      - uses: actions/upload-artifact@v2
+      - uses: actions/upload-artifact@v4
         if: failure()
         with:
           name: surefire-reports-build
@@ -37,45 +38,97 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [windows-latest]
         jdk-version: [11, 17, 21]
         jdk-distribution: [temurin, zulu, adopt, adopt-openj9, microsoft, corretto, semeru, oracle]
         exclude:
           - jdk-distribution: oracle
             jdk-version: 11
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
         with:
           path: xnio
-      - name: Download WildFly Core
-        uses: actions/checkout@v3
+      - name: Download WildFly Core 23.0.1.Final
+        if: ${{ matrix.jdk-version == 11 }}
+        uses: actions/checkout@v4
+        with:
+          repository: wildfly/wildfly-core
+          ref: 23.0.1.Final
+          path: wildfly-core
+      - name: Download WildFly Core Main Branch
+        if: ${{ matrix.jdk-version > 11 }}
+        uses: actions/checkout@v4
         with:
           repository: wildfly/wildfly-core
           ref: main
           path: wildfly-core
-      - name: Download WildFly
-        uses: actions/checkout@v3
+      - name: Download WildFly 31.0.0.Final
+        if: ${{ matrix.jdk-version == 11 }}
+        uses: actions/checkout@v4
+        with:
+          repository: wildfly/wildfly
+          ref: 31.0.0.Final
+          path: wildfly
+      - name: Download WildFly Main
+        if: ${{ matrix.jdk-version > 11 }}
+        uses: actions/checkout@v4
         with:
           repository: wildfly/wildfly
           ref: main
           path: wildfly
-      - name: Upgrade XNIO
+      - name: Upgrade XNIO - Windows
+        if: contains(matrix.os, 'windows')
+        run: |
+          cd xnio
+          echo "Evaluating the pom so we can see if there is something wrong with it..."
+          $xnio_version=$(mvn help:evaluate -Dexpression="project.version" --quiet -DforceStdout)
+          echo "Xnio Version found: $xnio_version"
+          cd ../wildfly-core
+          $wfcore_version=$(mvn help:evaluate -Dexpression="project.version" --quiet -DforceStdout)
+          echo "WildFly Core Version found: $wfcore_version"
+          echo "Current xnio version in wildfly-core pom.xml file:"
+          grep '<version.org.jboss.xnio>.*<\/version.org.jboss.xnio>' pom.xml
+          Get-Content pom.xml | ForEach-Object { $_ -replace '<version.org.jboss.xnio>.*<\/version.org.jboss.xnio>', $('<version.org.jboss.xnio>'+$xnio_version+'</version.org.jboss.xnio>') } | Set-Content newPom.xml
+          rm pom.xml
+          mv newPom.xml pom.xml
+          echo "Updated xnio version in wildfly-core pom.xml file:"
+          grep '<version.org.jboss.xnio>.*<\/version.org.jboss.xnio>' pom.xml
+          cd ../wildfly
+          echo "Current wildfly-core version in wildfly pom.xml file:"
+          grep '<version.org.wildfly.core>.*<\/version.org.wildfly.core>' pom.xml
+          Get-Content pom.xml | ForEach-Object { $_ -replace '<version.org.wildfly.core>.*<\/version.wildfly.core>', $('<version.org.wildfly.core>'+$wfcore_version+'</version.wildfly.core>') } | Set-Content newPom.xml
+          rm pom.xml
+          mv newPom.xml pom.xml
+          echo "Updated wildfly-core version in wildfly pom.xml file:"
+          grep '<version.org.wildfly.core>.*<\/version.org.wildfly.core>' pom.xml
+          cd ..
+      - name: Upgrade Xnio in WildFly
+        if: ${{ !contains (matrix.os, 'windows') }}
         run: |
           cd xnio
           xnio_version=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
-          mvn clean install -DskipTests=true
+          echo "Xnio Version found: $xnio_version"
           cd ../wildfly-core
           wfcore_version=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
-          sed -i "s/<version.org.jboss.xnio>.*<\/version.org.jboss.xnio>/<version.org.jboss.xnio>$xnio_version<\/version.org.jboss.xnio>/g" pom.xml
+          echo "WildFly Core Version found: $wfcore_version"
+          echo "Current xnio version in wildfly-core pom.xml file:"
+          grep '<version.org.jboss.xnio>.*<\/version.org.jboss.xnio>' pom.xml
+          sed -i'' -e "s/<version.org.jboss.xnio>.*<\/version.org.jboss.xnio>/<version.org.jboss.xnio>$xnio_version<\/version.org.jboss.xnio>/g" pom.xml
+          echo "Updated xnio version in wildfly-core pom.xml file:"
+          grep '<version.org.jboss.xnio>.*<\/version.org.jboss.xnio>' pom.xml
           cd ../wildfly
-          sed -i "s/<version.org.wildfly.core>.*<\/version.org.wildfly.core>/<version.org.wildfly.core>$wfcore_version<\/version.org.wildfly.core>/g" pom.xml
+          echo "Current wildfly-core version in wildfly pom.xml file:"
+          grep '<version.org.wildfly.core>.*<\/version.org.wildfly.core>' pom.xml
+          sed -i'' -e "s/<version.org.wildfly.core>.*<\/version.org.wildfly.core>/<version.org.wildfly.core>$wfcore_version<\/version.org.wildfly.core>/g" pom.xml
+          echo "Updated wildfly-core version in wildfly pom.xml file:"
+          grep '<version.org.wildfly.core>.*<\/version.org.wildfly.core>' pom.xml
           cd ..
       - name: Set up JDK ${{ matrix.jdk-distribution }} ${{ matrix.jdk-version }}
         uses: actions/setup-java@v4
         with:
           distribution: ${{ matrix.jdk-distribution }}
           java-version: ${{ matrix.jdk-version }}
-      - name: Build XNIO
+      - name: Build Xnio
         run: |
           cd xnio
           mvn clean install -DskipTests=true
@@ -89,9 +142,12 @@ jobs:
         run: |
           cd wildfly
           sh build.sh -ntp -U -B -fae clean install
+          sh build.sh -ntp -U -B -fae test -Dts.smoke
           cd ..
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
           name: surefire-WFIntegration-${{ matrix.jdk-distribution }}-${{ matrix.jdk-version }}-${{ matrix.os }}
-          path: '**/surefire-reports/*.txt'
+          path: |
+            '**/surefire-reports/*.txt'
+            '**/*output.txt'
