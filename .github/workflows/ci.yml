@@ -13,10 +13,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
-    - uses: AdoptOpenJDK/install-jdk@v1
+    - uses: actions/setup-java@v4
       name: Install JDK 8
       with:
-        version: 8    
+        distribution: temurin
+        java-version: 8
     - name: Build
       run: mvn -U -B -fae -DskipTests clean install
     - name: Tar Maven Repo
@@ -33,21 +34,16 @@ jobs:
         name: surefire-reports-build
         path: '**/surefire-reports/*.txt'
   test-matrix:
-    name: ${{ matrix.module }}-${{ matrix.openjdk_impl}}-${{ matrix.jdk }}-${{ matrix.os }}
+    name: ${{ matrix.module }}-${{ matrix.jdk_distribution}}-${{ matrix.jdk_version }}-${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     needs: build-all
     strategy:
       fail-fast: false
       matrix:
         module: [api, nio-impl]
-        os: [ubuntu-20.04, windows-latest, macos-latest]
-        jdk: [8, 11]
-        openjdk_impl: [hotspot, openj9]
-        exclude:
-          - os: macos-latest
-            openjdk_impl: openj9
-          - os: windows-latest
-            openjdk_impl: openj9
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        jdk_version: [8, 11, 17, 21]
+        jdk_distribution: [temurin, zulu, adopt, adopt-openj9, liberica, microsoft, correto, semeru, oracle, dragonwell]
     steps:
     - name: Configure runner - Linux 
       if: contains(matrix.os, 'ubuntu')
@@ -89,17 +85,17 @@ jobs:
     - name: Extract Maven Repo
       shell: bash
       run: tar -xzf maven-repo.tgz -C ~
-    - name: Set up JDK ${{ matrix.java }}
-      uses: AdoptOpenJDK/install-jdk@v1
+    - name: Set up JDK ${{ matrix.jdk_distribution }} ${{ matrix.jdk_version }}
+      uses: actions/setup-java@v4
       with:
-        version: ${{ matrix.jdk }}
-        impl: ${{ matrix.jdk_impl }}
+        distribution: ${{ matrix.jdk_distribution }}
+        java-version: ${{ matrix.jdk_version }}
     - name: Run Tests
       run: mvn -U -B -fae test -pl ${{ matrix.module }}
     - uses: actions/upload-artifact@v2
       if: failure()
       with:
-        name: surefire-reports-${{ matrix.module }}-${{ matrix.openjdk_impl}}-${{ matrix.jdk }}-${{ matrix.os }}
+        name: surefire-reports-${{ matrix.module }}-${{ matrix.jdk_distribution}}-${{ matrix.jdk_version }}-${{ matrix.os }}
         path: '**/surefire-reports/*.txt'
     - name: Run netstat (post)
       if: always()
