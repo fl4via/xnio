@@ -4,8 +4,7 @@
 name: XNIO CI
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+  push
 
 jobs:
   build-all:
