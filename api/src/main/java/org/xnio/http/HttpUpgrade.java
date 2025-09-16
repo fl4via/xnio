@@ -435,6 +435,7 @@ public class HttpUpgrade {
                     if (pushBackBuffer == null) {
                         pushBackBuffer = ByteBuffer.allocate(1024);
                         Buffers.copy(pushBackBuffer, buffer);
+                        pushBackBuffer.flip();
                         buffer.clear();
                         StreamSourceConduit orig = connection.getSourceChannel().getConduit();
                         PushBackStreamSourceConduit pushBack = new PushBackStreamSourceConduit(orig);
@@ -470,6 +471,7 @@ public class HttpUpgrade {
                         // same buffer
                         pushBackBuffer.clear();
                         Buffers.copy(pushBackBuffer, buffer);
+                        pushBackBuffer.flip();
                         // no need to set the pushback stream source conduit, it is already set
                     }
                 }
